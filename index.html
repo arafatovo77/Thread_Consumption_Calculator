@@ -599,6 +599,7 @@ tbody tr:hover td{background:#F4F8FE}
         <button class="btn btn-outline btn-sm" id="btnCsvColorways" data-i18n="exp_cway">Export Colorways CSV</button>
         <button class="btn btn-outline btn-sm" id="btnJson" data-i18n="exp_json">Export JSON</button>
         <button class="btn btn-outline btn-sm" id="btnImport" data-i18n="import">Import</button>
+        <button class="btn btn-outline btn-sm" id="btnPasteOps">Paste operations</button>
         <input type="file" id="fileImport" accept=".json,application/json,.csv,text/csv" style="display:none" />
         <button class="btn btn-danger btn-sm" id="btnReset" data-i18n="reset">Reset</button>
       </div>
@@ -707,7 +708,7 @@ tbody tr:hover td{background:#F4F8FE}
         <div class="ff ff-ops"><label class="field-label" for="p_currency"><span class="field-ico ico-ops">💱</span><span data-i18n="l_currency">Currency</span> <span class="req-mark" title="Required">*</span></label><input class="fi" id="p_currency" data-essential="true" aria-required="true" value="USD" /><div class="field-tip" data-i18n="tip_currency"></div></div>
         <div class="ff ff-ops">
           <label class="field-label" for="p_conelen"><span class="field-ico ico-ops">🧵</span><span data-i18n="l_conelen">Default cone length (m)</span> <span class="req-mark" title="Required">*</span></label>
-          <input class="fi" id="p_conelen" data-essential="true" aria-required="true" type="number" min="1" step="1" value="3000" />
+          <input class="fi" id="p_conelen" data-essential="true" aria-required="true" type="number" min="1" step="1" value="4000" />
           <div class="err" id="e_conelen" style="display:none">Cone length must be greater than zero.</div>
           <div class="field-tip" data-i18n="tip_conelen"></div>
         </div>
@@ -1105,6 +1106,58 @@ var STITCH_MASTER = [
 var STITCH_BY = {};
 STITCH_MASTER.forEach(function(s){ STITCH_BY[s.code] = s; });
 
+/* =======================================================================
+   v5 - WORLDWIDE (ISO) STITCH CLASSES
+   The full worldwide stitch classification from the user's textbook
+   scan, grouped by family. Codes that exist in the factory STITCH_MASTER
+   keep their own published factors. Every other worldwide code is
+   registered in STITCH_BY as a synthetic entry cloned from its family
+   representative (100->401, 200->301, 300->301, 400->401, 500->504,
+   600->602), so it calculates, validates and reports exactly like a
+   factory class - and the per-operation machine/needle allowance
+   override still lets the user correct its allowances by hand.
+   ======================================================================= */
+var WW_FAMILIES = [
+  {fam:"100", name:"Chain stitch", base:"401", codes:["101","103","104"]},
+  {fam:"200", name:"Hand stitch", base:"301", codes:["201","202","204","205","206","209","211","213","214","215","216","217","218","219","220"]},
+  {fam:"300", name:"Lock stitch", base:"301", codes:["301","302","303","304","305","306","307","308","309","310","312","313","314","315","316","318","321","322","324","325","327"]},
+  {fam:"400", name:"Multi-thread chain stitch", base:"401", codes:["401","402","403","404","405","406","407","408","409","411","412","413","414","415","417","418","419","420","421","423","424","425","426","430","431","432","433","434","437","438","439","440","444","446","447","449","450","451"]},
+  {fam:"500", name:"Overedge / overlock", base:"504", codes:["501","502","503","504","505","507","508","509","510","511","512","513","514","516","519","521","522","523","524","525","526","527","533","534","535","536","537","539","544","545","546","547","549","550","551"]},
+  {fam:"600", name:"Covering / flatlock", base:"602", codes:["601","602","603","604","605","606","607","609"]}
+];
+var WW_BY_CODE = {};
+WW_FAMILIES.forEach(function(f){
+  f.codes.forEach(function(c){ WW_BY_CODE[c] = {fam:f.fam, name:f.name, base:f.base}; });
+});
+var WW_FACTORY_CODES = {};
+STITCH_MASTER.forEach(function(s){ WW_FACTORY_CODES[s.code] = true; });
+WW_FAMILIES.forEach(function(f){
+  f.codes.forEach(function(c){
+    if(STITCH_BY[c]) return;   /* factory class - real published factors win */
+    var b = STITCH_BY[f.base], e = {}, k;
+    for(k in b) e[k] = b[k];
+    e.code = c;
+    e.desc = f.name + " (Worldwide " + c + ")";
+    e.label = c + " - " + f.name + " (Worldwide)";
+    e.ww = true; e.baseCode = f.base; e.famCode = f.fam; e.famName = f.name;
+    STITCH_BY[c] = e;
+  });
+});
+/* Grouped <optgroup> HTML for the worldwide families, used by every stitch
+   dropdown. Factory-native codes are listed (the classification is shown
+   complete) but never carry "selected" here - their factory option above
+   owns the selection, so the stored code is identical either way. */
+function wwOptgroupsHtml(selectedCode){
+  return WW_FAMILIES.map(function(f){
+    return '<optgroup label="Worldwide ' + f.fam + ' \u2014 ' + f.name + '">'
+      + f.codes.map(function(c){
+        var sel = (c === selectedCode && !WW_FACTORY_CODES[c]) ? ' selected' : '';
+        return '<option value="' + c + '"' + sel + '>' + c + ' \u2014 ' + f.name + '</option>';
+      }).join("")
+      + '</optgroup>';
+  }).join("");
+}
+
 /* Needle-thread share of the machine allowance, from the sheet's own factor
    columns. Using a ratio (rather than a raw factor sum) keeps the needle /
    looper split reconciling exactly to the total even when a user overrides
@@ -1242,6 +1295,7 @@ function buildCells(ops, colorways, W, PP){
           pathBasic:pathBasic, pathWaste:pathWaste, pathFinal:pathFinal,
           colour:colour, ticket:ticket, sku:sku,
           coneLen: assignConeLen(a, cw, PP), conePrice: assignConePrice(a, cw, PP),
+          coneFromDefault: !((a && Number(a.coneLen) > 0) || Number(cw.coneLen) > 0),
           qty:qty, orderMetres: pathFinal * qty
         });
       });
@@ -1254,17 +1308,27 @@ function buildCells(ops, colorways, W, PP){
    "metres" is the order-weighted per-garment-equivalent (orderMetres/qty),
    since a group can combine cells drawn from different colorways with
    different quantities. */
+/* v5 auto cone rule: a booking group whose cone length comes from the
+   project default (no per-row or per-colorway override) and whose total
+   order quantity is below 2000 m is booked on a 2000 m cone instead of
+   the default cone. Explicit overrides are always respected. */
+var AUTO_CONE_LEN = 2000, AUTO_CONE_TRIGGER = 2000;
 function buildGroupsFromCells(cells){
   var map = {};
   cells.forEach(function(cell){
     var key = [cell.colour, cell.ticket, cell.sku, cell.coneLen, cell.conePrice].join("|");
-    if(!map[key]) map[key] = {key:key, colour:cell.colour, ticket:cell.ticket, sku:cell.sku, coneLen:cell.coneLen, conePrice:cell.conePrice, orderMetres:0, qty:0, cellCount:0};
+    if(!map[key]) map[key] = {key:key, colour:cell.colour, ticket:cell.ticket, sku:cell.sku, coneLen:cell.coneLen, conePrice:cell.conePrice, orderMetres:0, qty:0, cellCount:0, fromDefault:true};
     map[key].orderMetres += cell.orderMetres;
     map[key].qty += cell.qty;
     map[key].cellCount += 1;
+    if(cell.coneFromDefault === false) map[key].fromDefault = false;
   });
   return Object.keys(map).map(function(k){
     var g = map[k];
+    g.autoCone = false;
+    if(g.fromDefault && g.orderMetres > 0 && g.orderMetres < AUTO_CONE_TRIGGER && g.coneLen > AUTO_CONE_LEN){
+      g.setConeLen = g.coneLen; g.coneLen = AUTO_CONE_LEN; g.autoCone = true;
+    }
     var cones = ceilDiv(g.orderMetres, g.coneLen);
     var perM = g.coneLen > 0 ? g.conePrice / g.coneLen : 0;
     g.metres = g.qty > 0 ? g.orderMetres / g.qty : 0;
@@ -1666,7 +1730,7 @@ function csvToColorways(text){
   return {colorways:colorways, warnings:warnings};
 }
 
-var P = { qty:1000, wastage:15, currency:"USD", coneLen:3000, conePrice:180 };
+var P = { qty:1000, wastage:15, currency:"USD", coneLen:4000, conePrice:180 };
 var OPS = [];
 var COLORWAYS = [];
 var TAB = "overview";
@@ -1977,7 +2041,8 @@ function renderTable(){
     var op = r.op, s = STITCH_BY[op.stitchCode];
     var opts = STITCH_MASTER.map(function(x){
       return '<option value="'+x.code+'"'+(x.code===op.stitchCode?' selected':'')+'>'+esc(x.label || (x.code+" - "+x.desc))+'</option>';
-    }).join("");
+    }).join("") + wwOptgroupsHtml(op.stitchCode);
+    var sTip = (s && s.ww) ? ' title="Worldwide class \u2014 calculated with family base factors ('+s.baseCode+')"' : '';
     var units = Object.keys(UNIT_LABELS).map(function(u){
       return '<option value="'+u+'"'+(u===op.unit?' selected':'')+'>'+UNIT_LABELS[u]+'</option>';
     }).join("");
@@ -1986,7 +2051,7 @@ function renderTable(){
     html += '<tr data-row="'+op.id+'" class="'+(r.valid?"":"invalid")+'">'
       + '<td>'+r.serial+'</td>'
       + '<td><input class="tbl-inp wide" list="opBulletin" data-essential="true" aria-required="true" data-f="name" data-id="'+op.id+'" value="'+esc(op.name)+'" placeholder="e.g. Shoulder join" aria-label="Operation name" /></td>'
-      + '<td><select class="tbl-inp" data-essential="true" aria-required="true" data-f="stitchCode" data-id="'+op.id+'" aria-label="Stitch class">'+opts+'</select></td>'
+      + '<td><select class="tbl-inp" data-essential="true" aria-required="true" data-f="stitchCode" data-id="'+op.id+'" aria-label="Stitch class"'+sTip+'>'+opts+'</select></td>'
       + '<td><input class="tbl-inp" data-essential="true" aria-required="true" type="number" min="0" step="0.01" data-f="seamLength" data-id="'+op.id+'" value="'+esc(op.seamLength)+'" aria-label="Seam length" /></td>'
       + '<td><select class="tbl-inp" data-essential="true" aria-required="true" data-f="unit" data-id="'+op.id+'" aria-label="Unit">'+units+'</select></td>'
       + '<td>'+freqCell+'</td>'
@@ -2702,7 +2767,7 @@ function renderResults(){
   var gRows = S.groups.map(function(g){
     return '<tr><td>'+colourDot(g.colour)+esc(g.colour)+'</td><td>'+esc(g.ticket)+'</td><td>'+esc(g.sku||"-")+'</td>'
       + '<td class="num">'+fmt(g.metres)+'</td><td class="num">'+fmt(g.orderMetres)+'</td>'
-      + '<td class="num">'+esc(g.coneLen)+'</td><td class="num">'+esc(cur)+' '+fmt(g.conePrice,2)+'</td>'
+      + '<td class="num">'+esc(g.coneLen)+(g.autoCone?'<div style="font-size:11px;color:#0d9488;font-weight:700;">Auto 2000 m cone</div>':'')+'</td><td class="num">'+esc(cur)+' '+fmt(g.conePrice,2)+'</td>'
       + '<td class="num" style="font-weight:700;">'+g.cones+'</td>'
       + '<td class="num">'+esc(cur)+' '+fmt(g.theoreticalCost,2)+'</td>'
       + '<td class="num" style="font-weight:700;">'+esc(cur)+' '+fmt(g.purchaseCost,2)+'</td></tr>';
@@ -2768,7 +2833,7 @@ function buildPrint(S){
   }).join("");
   var grpRows = S.groups.map(function(x){
     return '<tr><td>'+esc(x.colour)+'</td><td>'+esc(x.ticket)+'</td><td class="num">'+fmt(x.orderMetres)+'</td>'
-      + '<td class="num">'+esc(x.coneLen)+'</td><td class="num">'+x.cones+'</td>'
+      + '<td class="num">'+esc(x.coneLen)+(x.autoCone?' (auto 2000 m)':'')+'</td><td class="num">'+x.cones+'</td>'
       + '<td class="num">'+esc(cur)+' '+fmt(x.purchaseCost,2)+'</td></tr>';
   }).join("");
 
@@ -2920,6 +2985,65 @@ document.getElementById("fileBulletin").onchange = function(e){
     }
   };
   if(isExcel) r.readAsArrayBuffer(f); else r.readAsText(f);
+};
+/* =======================================================================
+   v5 - PASTE OPERATIONS
+   Same import as the Operations CSV file flow (csvToOps + replace
+   confirmation + toast/warnings), but the text comes from a paste box
+   instead of a file. Rows copied from Excel arrive TAB-separated, so
+   tab-separated text is first normalised to CSV (fields containing a
+   comma or quote are quoted) and then parsed by the exact same parser.
+   ======================================================================= */
+function pasteToCsvText(text){
+  text = String(text || "");
+  if(text.indexOf("\t") === -1) return text;
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").map(function(line){
+    return line.split("\t").map(function(f){
+      f = f.trim();
+      return /[",]/.test(f) ? '"' + f.replace(/"/g, '""') + '"' : f;
+    }).join(",");
+  }).join("\n");
+}
+function importOpsFromText(text){
+  var res = csvToOps(text);
+  if(!res.ops){
+    alert("This data could not be imported:\n\n" + res.warnings.join("\n"));
+    return;
+  }
+  var proceed = function(){
+    OPS = res.ops;
+    validateProject(); renderTable(); save();
+    showToast(res.ops.length + " operation(s) imported from pasted data" + (res.warnings.length ? " (" + res.warnings.length + " warning" + (res.warnings.length>1?"s":"") + ")" : "") + ".");
+    if(res.warnings.length) alert("Imported with warnings:\n\n" + res.warnings.join("\n"));
+  };
+  if(OPS.length){
+    openModal(
+      '<h3 class="section-title">Replace existing operations?</h3>'
+      + '<p class="section-sub">The pasted data contains ' + res.ops.length + ' operation(s) and will replace the ' + OPS.length + ' operation(s) already in this calculation.</p>'
+      + '<div style="display:flex;justify-content:flex-end;gap:8px;">'
+      + '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'
+      + '<button class="btn btn-primary" id="btnConfirmCsvImport">Replace</button></div>'
+    );
+    document.getElementById("btnConfirmCsvImport").onclick = function(){ closeModal(); proceed(); };
+  } else {
+    proceed();
+  }
+}
+document.getElementById("btnPasteOps").onclick = function(){
+  openModal(
+    '<h3 class="section-title">Paste operations</h3>'
+    + '<p class="section-sub">Copy rows from Excel or a CSV file and paste them here. Use the same columns as the Operations CSV import: Operation, Stitch Code, Seam Length, Unit, Rows/Passes (Machine Allowance, Needle Allowance and Notes are optional). Tab-separated rows copied from Excel work as-is.</p>'
+    + '<textarea id="pasteOpsText" rows="10" placeholder="Paste rows copied from Excel or CSV here" style="width:100%;box-sizing:border-box;padding:10px 12px;border-radius:10px;border:1px solid #94a3b8;background:transparent;color:inherit;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;min-height:170px;"></textarea>'
+    + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">'
+    + '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'
+    + '<button class="btn btn-primary" id="btnDoPasteOps">Import</button></div>'
+  );
+  document.getElementById("btnDoPasteOps").onclick = function(){
+    var text = document.getElementById("pasteOpsText").value;
+    if(!text || !text.trim()){ alert("Paste some operation rows first."); return; }
+    closeModal();
+    importOpsFromText(pasteToCsvText(text));
+  };
 };
 document.getElementById("btnImport").onclick = function(){ document.getElementById("fileImport").click(); };
 document.getElementById("fileImport").onchange = function(e){
@@ -3295,7 +3419,7 @@ document.getElementById("btnReset").onclick = function(){
 function doReset(){
   OPS = [];
   COLORWAYS = [];
-  P = { qty:1000, wastage:15, currency:"USD", coneLen:3000, conePrice:180 };
+  P = { qty:1000, wastage:15, currency:"USD", coneLen:4000, conePrice:180 };
   ["p_company","p_buyer","p_style","p_garment","p_size","p_prepared"].forEach(function(id){
     document.getElementById(id).value = "";
   });
@@ -3346,7 +3470,7 @@ document.getElementById("btnDemoColorway").onclick = function(){
     a.garmentColourwayId = cwNavy.id; a.colour = "White"; a.ticket = "Tex 30";
   });
   opNavyHem.assignments.push(newAssignment(needlePath, "ALL"));
-  P.wastage = 15; P.coneLen = 3000; P.conePrice = 180;
+  P.wastage = 15; P.coneLen = 4000; P.conePrice = 180;
   syncProjectInputs(); validateProject(); renderTable(); renderColorways(); renderAssignments();
   showToast("Colorway demo loaded - 3 colorways (750 pcs total) across 6 shared operations, with one contrast-thread assignment.");
 };
@@ -3360,7 +3484,7 @@ document.getElementById("btnDemoColorway").onclick = function(){
 var ORDERS = [];
 var CURRENT_ORDER_ID = null;
 function blankSnapshot(){
-  return { P:{qty:1000, wastage:15, currency:"USD", coneLen:3000, conePrice:180}, OPS:[], COLORWAYS:[], meta:{}, bulletin:[] };
+  return { P:{qty:1000, wastage:15, currency:"USD", coneLen:4000, conePrice:180}, OPS:[], COLORWAYS:[], meta:{}, bulletin:[] };
 }
 function newOrderRecord(name, snapshot){
   return { id:uid(), name:name || "Untitled style", autoName:true, updatedAt:new Date().toISOString(), snapshot: snapshot || blankSnapshot() };
@@ -3374,7 +3498,7 @@ function snapshotCurrent(){
    is PER-STYLE - switching styles swaps in that style's own imported
    bulletin instead of leaving the previous style's list showing. */
 function applySnapshot(snap){
-  P = { qty:1000, wastage:15, currency:"USD", coneLen:3000, conePrice:180 };
+  P = { qty:1000, wastage:15, currency:"USD", coneLen:4000, conePrice:180 };
   if(snap && snap.P) for(var k in snap.P) P[k] = snap.P[k];
   OPS = (snap && Array.isArray(snap.OPS)) ? snap.OPS.map(function(o){ var n = newOp(o); n.id = uid(); return n; }) : [];
   COLORWAYS = (snap && Array.isArray(snap.COLORWAYS)) ? snap.COLORWAYS.map(function(c){ return newColorway(c); }) : [];
@@ -3795,7 +3919,7 @@ function applyAccessLock(){
   var main = document.querySelector(".appshell");
   if(main) main.classList.toggle("read-only-mode", readOnly);
   var lockSelectors = ["#p_qty","#p_wastage","#p_currency","#p_conelen","#p_coneprice",
-    "#btnImportBulletin","#btnDemo","#btnDemoColorway","#btnClear","#btnAdd",
+    "#btnImportBulletin","#btnDemo","#btnDemoColorway","#btnClear","#btnAdd","#btnPasteOps",
     "#btnAddColorway","#btnAddColorway2",
     "#btnSaveStyle","#btnReset"].concat(META_IDS.map(function(id){ return "#"+id; }));
   lockSelectors.forEach(function(sel){
@@ -4206,7 +4330,8 @@ function initAuth(){
 (function init(){
   document.getElementById("p_date").value = new Date().toISOString().slice(0,10);
   document.getElementById("f_stitch").innerHTML = '<option value="">' + t("all_stitch") + '</option>'
-    + STITCH_MASTER.map(function(s){ return '<option value="'+s.code+'">'+esc(s.label || (s.code+" - "+s.desc))+'</option>'; }).join("");
+    + STITCH_MASTER.map(function(s){ return '<option value="'+s.code+'">'+esc(s.label || (s.code+" - "+s.desc))+'</option>'; }).join("")
+    + wwOptgroupsHtml("");
   CORE_READY = true;
 
   /* Language toggle */
@@ -4321,6 +4446,73 @@ function initAuth(){
     pill.appendChild(btnG); pill.appendChild(btnW);
     document.body.appendChild(pill);
     paint(); syncVis(); setInterval(syncVis, 800);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+
+<script>
+/* v5: Worldwide Stitch Classes reference (added for Arafat) - browsable,
+   searchable list of the ISO stitch families. Button sits just above the
+   GMS Standard / Worldwide switch. */
+(function(){
+  function escH(s){ return String(s==null?"":s).replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+  function closeModal(){ var m = document.getElementById('wwModal'); if(m) m.remove(); }
+  function famHtml(f){
+    var chips = f.codes.map(function(c){
+      var native = (typeof STITCH_BY !== 'undefined') && STITCH_BY[c] && !STITCH_BY[c].ww;
+      return '<span data-code="'+c+'" style="display:inline-block;margin:0 5px 6px 0;padding:4px 9px;border-radius:999px;border:1px solid '+(native?'#0d9488':'#2b4a66')+';background:'+(native?'rgba(13,148,136,.18)':'rgba(255,255,255,.04)')+';color:#e9eff7;font-size:12.5px;font-weight:700">'+c+'</span>';
+    }).join('');
+    return '<div data-fam="'+f.fam+'" style="margin-bottom:16px">'
+      + '<div style="font-size:13.5px;font-weight:800;color:#fff;margin-bottom:2px">Worldwide '+f.fam+' \u2014 '+escH(f.name)+'</div>'
+      + '<div style="font-size:11.5px;color:#9db4cc;margin-bottom:8px">Calculated with '+f.base+' family base factors where no factory class exists. Teal = factory class with its own published factors.</div>'
+      + '<div>'+chips+'</div></div>';
+  }
+  function openModal(){
+    closeModal();
+    if(typeof WW_FAMILIES === 'undefined') return;
+    var ov = document.createElement('div');
+    ov.id = 'wwModal';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(2,8,16,.62);z-index:10000;display:flex;align-items:center;justify-content:center;padding:14px';
+    ov.innerHTML = '<div style="background:#12233a;border:1px solid #2b4a66;border-radius:16px;max-width:560px;width:100%;max-height:88vh;overflow:auto;padding:20px;box-shadow:0 30px 80px rgba(0,0,0,.5)">'
+      + '<div style="font-size:16px;font-weight:800;color:#fff;margin-bottom:4px">Worldwide Stitch Classes</div>'
+      + '<div style="font-size:12.5px;color:#9db4cc;margin-bottom:12px">All ISO stitch classes available in the Stitch class dropdown of every operation. Type a number to filter.</div>'
+      + '<input id="wwSearch" placeholder="Search by number, e.g. 516" style="width:100%;box-sizing:border-box;padding:9px 11px;border-radius:9px;border:1px solid #2b4a66;background:#0e1727;color:#e9eff7;font-size:13.5px;margin-bottom:16px">'
+      + WW_FAMILIES.map(famHtml).join('')
+      + '<div style="display:flex;justify-content:flex-end;margin-top:6px"><button id="wwClose" style="border:1px solid #2b4a66;border-radius:10px;padding:11px 14px;background:transparent;color:#cfe0f2;font-weight:700;cursor:pointer">Close</button></div>'
+      + '</div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', function(e){ if(e.target === ov) closeModal(); });
+    document.getElementById('wwClose').addEventListener('click', closeModal);
+    var inp = document.getElementById('wwSearch');
+    inp.addEventListener('input', function(){
+      var q = inp.value.trim();
+      ov.querySelectorAll('[data-fam]').forEach(function(sec){
+        var any = false;
+        sec.querySelectorAll('[data-code]').forEach(function(chip){
+          var show = !q || chip.getAttribute('data-code').indexOf(q) !== -1;
+          chip.style.display = show ? '' : 'none';
+          if(show) any = true;
+        });
+        sec.style.display = any ? '' : 'none';
+      });
+    });
+    inp.focus();
+  }
+  var btn;
+  function syncVis(){
+    if(!btn) return;
+    var auth = document.getElementById('authScreen');
+    var authVisible = auth && getComputedStyle(auth).display !== 'none';
+    btn.style.display = authVisible ? 'none' : '';
+  }
+  function init(){
+    btn = document.createElement('button');
+    btn.id = 'wwBtn'; btn.type = 'button'; btn.textContent = '\uD83C\uDF10 Stitch Classes';
+    btn.style.cssText = 'position:fixed;left:12px;bottom:96px;z-index:9998;border:1px solid #2b4a66;border-radius:999px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;background:#0f2233;color:#cfe0f2;box-shadow:0 10px 26px rgba(0,0,0,.4)';
+    btn.addEventListener('click', openModal);
+    document.body.appendChild(btn);
+    syncVis(); setInterval(syncVis, 800);
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
